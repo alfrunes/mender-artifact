@@ -83,6 +83,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"unsafe"
 )
 
@@ -106,34 +107,38 @@ type DeltaDecoding struct {
 	inFile io.Reader
 	// outFile : patched file
 	outFile io.Writer
-	// buffer used by xdelta algorithm
+	// buffer for the xdelta input stream
+	// NOTE: Xdelta actually allocates another buffer of
+	//       same dimension for the stream as well, thus
+	//       the actual memory requirements are the double
+	//       of this provided buffer.
 	inBuf []byte
 }
 
-func NewDeltaDecoding (srcFile io.ReadSeeker, inFile io.Reader, outFile io.Writer, buf []byte) *DeltaDecoding {
-    return &DeltaDecoding{
-        srcFile: srcFile,
-        inFile: inFile,
-        outFile: outFile,
-        inBuf: buf,
-    }
+func NewDeltaDecoding(srcFile io.ReadSeeker, inFile io.Reader, outFile io.Writer, buf []byte) *DeltaDecoding {
+	return &DeltaDecoding{
+		srcFile: srcFile,
+		inFile:  inFile,
+		outFile: outFile,
+		inBuf:   buf,
+	}
 }
 
-
-// TODO: Decide whether size info should be part of patch
-//       header or part of mender artifact meta data.
-
+// Decodes source and patch (in) to an updated revision (out).
 func (d *DeltaDecoding) Decode() error {
-    return d.encodeDecode(C.codeFunc(C.xd3_decode_input))
+	return d.encodeDecode(C.codeFunc(C.xd3_decode_input))
 }
 
+// Encodes source and updated revision (in) to a VCDIFF patch (out).
 func (d *DeltaDecoding) Encode() error {
-    return d.encodeDecode(C.codeFunc(C.xd3_encode_input))
+	return d.encodeDecode(C.codeFunc(C.xd3_encode_input))
 }
 
-// TODO: Make a workaround to actually copy buffers instead
-//       of constantly using C.CBytes which uses malloc and
-//       hence need to be manually freed.
+// encodeDecode is a general function to encode / decode a byte stream
+// to / from a patch / updated revision respectively. The actual encoding
+// and decoding happens in xd3_encode_input and xd3_decode_input functions
+// respectively, and the preparations of the streams are completely the same
+// only the meaning of "in" and "out" is swapped.
 func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 
 	stream := C.getStream()
@@ -144,13 +149,14 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 		return errors.New("[DeltaDecoding]: Calling decode without configuring streams {source|patch|out}.")
 	}
 
+	// Setup buffers and initiate c interface
 	if len(d.inBuf) == 0 {
 		d.inBuf = make([]byte, int(C.xd3_const.allocSize))
 	} else if len(d.inBuf) < int(C.xd3_const.allocSize) {
 		return errors.New("XDelta3 buffer too small.")
 	}
 
-	// temporary buffer to emulate C-type fread
+	// temporary buffer for source
 	buf := make([]byte, len(d.inBuf))
 
 	// Configure source and stream
@@ -160,8 +166,8 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 	C.xd3_init_config(config, C.xd3_const.adler32)
 	config.winsize = C.uint(len(d.inBuf))
 	C.xd3_config_stream(stream, config)
-
-	source.blksize = C.uint(len(d.inBuf))
+	source.curblk = (*C.uchar)(unsafe.Pointer(&buf[0]))
+	source.blksize = C.uint(len(buf))
 
 	// Load first block from stream
 	onblk, err := d.srcFile.Read(buf)
@@ -170,46 +176,35 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 	}
 	source.onblk = C.uint(onblk)
 	source.curblkno = 0
-	source.curblk = (*C.uchar)(C.CBytes(buf))
 
 	C.xd3_set_source(stream, source)
 
 	var ret C.int
-	var Cbuf unsafe.Pointer
 	for {
 		// get a new chunk of patch file
 		bytesRead, err := d.inFile.Read(d.inBuf)
 		if bytesRead < len(d.inBuf) {
 			C.xd3_set_flags(stream, C.xd3_const.flush|stream.flags)
 		}
-		Cbuf = C.CBytes(d.inBuf)
-		C.xd3_avail_input(stream, (*C.uchar)(Cbuf), C.uint(bytesRead))
-		for ret = C._xd3_code(XD3_CODE, stream); ret != C.xd3_const.input;
-            ret = C._xd3_code(XD3_CODE, stream) {
+		C.xd3_avail_input(stream, (*C.uchar)(unsafe.Pointer(&d.inBuf[0])), C.uint(bytesRead))
+		for ret = C._xd3_code(XD3_CODE, stream); ret != C.xd3_const.input; ret = C._xd3_code(XD3_CODE, stream) {
 			switch ret {
 			case C.xd3_const.output:
 				bytesWritten, err := d.outFile.Write(C.GoBytes(unsafe.Pointer(stream.next_out),
 					C.int(stream.avail_out)))
 				if err != nil {
-					C.free(unsafe.Pointer(source.curblk))
-					C.free(Cbuf)
 					return err
 				} else if bytesWritten != int(stream.avail_out) {
-					C.free(unsafe.Pointer(source.curblk))
-					C.free(Cbuf)
 					return errors.New("Wrote an unexpected amount through xdelta stream, ABORTING.")
 				}
 				C.xd3_consume_output(stream)
 
 			case C.xd3_const.getsrcblk:
 				_, err = d.srcFile.Seek(int64(source.blksize)*int64(source.getblkno), io.SeekStart)
-				C.free(unsafe.Pointer(source.curblk))
 				if bytesRead, err = d.srcFile.Read(buf); err != nil {
-					C.free(unsafe.Pointer(source.curblk))
-					C.free(Cbuf)
 					return err
 				}
-				source.curblk = (*C.uchar)(C.CBytes(buf))
+				source.curblk = (*C.uchar)(unsafe.Pointer(&buf[0]))
 				source.onblk = C.uint(bytesRead)
 				source.curblkno = C.ulong(source.getblkno)
 
@@ -218,22 +213,17 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 			case C.xd3_const.winfinish:
 
 			default:
-				C.free(unsafe.Pointer(source.curblk))
-				C.free(Cbuf)
 				stream_msg := C.GoString(stream.msg)
 				e := errors.New(fmt.Sprintf("Xdelta error: %s [exit code: %d].", stream_msg, int(ret)))
 				return e
 			}
 		}
-		C.free(Cbuf)
 		if bytesRead != len(d.inBuf) {
 			break
 		}
 	}
-	C.free(unsafe.Pointer(source.curblk))
 	C.xd3_close_stream(stream)
 	C.xd3_free_stream(stream)
 
 	return nil
 }
-
