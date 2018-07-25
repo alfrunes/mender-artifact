@@ -110,6 +110,29 @@ func run() error {
 			"the artifact signature.",
 	}
 
+    //
+    // delta
+    //
+	deltaCommand := cli.Command{
+		Name:  "delta",
+        Action: createDelta,
+		Usage: "Create rootfs delta.",
+		ArgsUsage: "<image path [old]> <image path [new]> <patch path>",
+	}
+	deltaCommand.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:  "rootfs-old, s",
+			Usage: "Path to old rootfs",
+		},
+		cli.StringFlag{
+			Name: "rootfs-new, i",
+			Usage: "Path to new rootfs.",
+        },
+		cli.StringFlag{
+			Name: "output-path, o",
+			Usage: "Path / file name of the generated delta patch.",
+        },
+    }
 	//
 	// validate
 	//
@@ -232,6 +255,7 @@ func run() error {
 	app.Commands = []cli.Command{
 		writeCommand,
 		readCommand,
+        deltaCommand,
 		validate,
 		sign,
 		modify,

@@ -18,8 +18,9 @@ package delta
 // CGO comment
 // This comment is treated as c-code.
 
-// Change default minimum buffer allocation size to 512 bytes.
-#define XD3_ALLOCSIZE 512
+// Set window size to 4kB total memory usage approx. 8~12kB.
+#define XD3_ALLOCSIZE 4096
+#define XD3_BUILD_FAST 1
 
 #include <stdlib.h>
 #include <string.h>
@@ -27,36 +28,10 @@ package delta
 #include <xdelta3.h>
 #include <xdelta3.c>
 
-// Wrap C macros (constants) into struct for access in go
-struct xd3_constants {
-    int allocSize;
-    // config flag adler32 checksum
-    int adler32;
-    // stream flag flush
-    int flush;
-    // xd3_decode_input return values of interest //
-    // XD3_INPUT: decode process require more input.
-    int input;
-    // XD3_OUTPUT: decode process has more input.
-    int output;
-    // XD3_GETSRCBLK: notification returned to initiate non-blocking source read.
-    int getsrcblk;
-    // XD3_GOTHEADER: notification returned following the VCDIFF header
-    //                and first window header.
-    int gotheader;
-    // XD3_WINSTART: general notification returned for each window.
-    int winstart;
-    // XD3_WINFINISH: general notification following the compleate input and output
-    //                of a window.
-    int winfinish;
-};
-// make the macros available in go
-struct xd3_constants xd3_const = {XD3_ALLOCSIZE, XD3_ADLER32,
-                                  XD3_FLUSH, XD3_INPUT,
-                                  XD3_OUTPUT, XD3_GETSRCBLK,
-                                  XD3_GOTHEADER, XD3_WINSTART,
-                                  XD3_WINFINISH};
 
+#ifdef HAVE_LZMA_H_
+#include <xdelta3-lzma.h>
+#endif
 // These structures has to reside in the C code in order
 // for the cgo checks to pass.
 static xd3_stream stream;
@@ -76,16 +51,17 @@ int _xd3_code(codeFunc f, xd3_stream * stream) { return f(stream); }
 
 // Add lzma compression library if tag is defined.
 #cgo lzma LDFLAGS: -llzma
-#cgo CFLAGS: -I../vendor/xdelta3-3.0.11/
+#cgo CFLAGS: -I../vendor/xdelta3-3.0.11
 */
 import "C"
 import (
-	"errors"
-	"fmt"
 	"io"
-	"os"
 	"unsafe"
+
+	"github.com/pkg/errors"
 )
+
+const ALLOCSIZE = C.XD3_ALLOCSIZE
 
 /**
 +-----------------------------------+
@@ -93,11 +69,11 @@ import (
 |...  file1 = core-image.patch      |==inFile=====++
 +-----------------------------------+             ||
 +-----------------------------------+             || srcFile.doPatch(inFile) -> outFile
-|/dev/active-part  (ro-rootfs)      |==srcFile====++=========++
-+-----------------------------------+ (io.Writer - delta.go) ||
-+-----------------------------------+                        VV       +------------------+
-|/dev/inactive-part                 |==outFile==========++===========>|updated partition |
-+-----------------------------------+ (os.File - blockdevice)         +------------------+
+|/dev/active-part  (ro-rootfs)      |==srcFile====++===========++
++-----------------------------------+ (blockdevice - delta.go) ||
++-----------------------------------+                          VV     +------------------+
+|/dev/inactive-part                 |==outFile=================++====>|updated partition |
++-----------------------------------+ (blockdevice)                   +------------------+
 */
 
 type DeltaDecoding struct {
@@ -151,8 +127,8 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 
 	// Setup buffers and initiate c interface
 	if len(d.inBuf) == 0 {
-		d.inBuf = make([]byte, int(C.xd3_const.allocSize))
-	} else if len(d.inBuf) < int(C.xd3_const.allocSize) {
+		d.inBuf = make([]byte, int(C.XD3_ALLOCSIZE))
+	} else if len(d.inBuf) < int(C.XD3_ALLOCSIZE) {
 		return errors.New("XDelta3 buffer too small.")
 	}
 
@@ -163,7 +139,7 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 	C.memset(unsafe.Pointer(stream), 0, C.sizeof_xd3_stream)
 	C.memset(unsafe.Pointer(source), 0, C.sizeof_xd3_stream)
 
-	C.xd3_init_config(config, C.xd3_const.adler32)
+	C.xd3_init_config(config, C.XD3_ADLER32)
 	config.winsize = C.uint(len(d.inBuf))
 	C.xd3_config_stream(stream, config)
 	source.curblk = (*C.uchar)(unsafe.Pointer(&buf[0]))
@@ -172,7 +148,8 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 	// Load first block from stream
 	onblk, err := d.srcFile.Read(buf)
 	if err != nil {
-		return err
+		C.xd3_free_stream(stream)
+		return errors.Wrapf(err, "Xdelta: error reading from source file")
 	}
 	source.onblk = C.uint(onblk)
 	source.curblkno = 0
@@ -184,44 +161,63 @@ func (d *DeltaDecoding) encodeDecode(XD3_CODE C.codeFunc) error {
 		// get a new chunk of patch file
 		bytesRead, err := d.inFile.Read(d.inBuf)
 		if bytesRead < len(d.inBuf) {
-			C.xd3_set_flags(stream, C.xd3_const.flush|stream.flags)
+			C.xd3_set_flags(stream, C.XD3_FLUSH|stream.flags)
 		}
 		C.xd3_avail_input(stream, (*C.uchar)(unsafe.Pointer(&d.inBuf[0])), C.uint(bytesRead))
-		for ret = C._xd3_code(XD3_CODE, stream); ret != C.xd3_const.input; ret = C._xd3_code(XD3_CODE, stream) {
+		for ret = C._xd3_code(XD3_CODE, stream); ret != C.XD3_INPUT; ret = C._xd3_code(XD3_CODE, stream) {
 			switch ret {
-			case C.xd3_const.output:
+			case C.XD3_OUTPUT:
 				bytesWritten, err := d.outFile.Write(C.GoBytes(unsafe.Pointer(stream.next_out),
-					C.int(stream.avail_out)))
+					                                C.int(stream.avail_out)))
 				if err != nil {
+					C.xd3_close_stream(stream)
+					C.xd3_free_stream(stream)
 					return err
 				} else if bytesWritten != int(stream.avail_out) {
+					C.xd3_close_stream(stream)
+					C.xd3_free_stream(stream)
 					return errors.New("Wrote an unexpected amount through xdelta stream, ABORTING.")
 				}
 				C.xd3_consume_output(stream)
 
-			case C.xd3_const.getsrcblk:
+			case C.XD3_GETSRCBLK:
 				_, err = d.srcFile.Seek(int64(source.blksize)*int64(source.getblkno), io.SeekStart)
+				if err != nil {
+					C.xd3_close_stream(stream)
+					C.xd3_free_stream(stream)
+					return errors.Wrapf(err, "Xdelta: error seeking in source file")
+				}
 				if bytesRead, err = d.srcFile.Read(buf); err != nil {
-					return err
+					C.xd3_close_stream(stream)
+					C.xd3_free_stream(stream)
+					return errors.Wrapf(err, "Xdelta: error reading from source file")
 				}
 				source.curblk = (*C.uchar)(unsafe.Pointer(&buf[0]))
 				source.onblk = C.uint(bytesRead)
 				source.curblkno = C.ulong(source.getblkno)
 
-			case C.xd3_const.gotheader:
-			case C.xd3_const.winstart:
-			case C.xd3_const.winfinish:
+			case C.XD3_GOTHEADER:
+			case C.XD3_WINSTART:
+			case C.XD3_WINFINISH:
 
+			case C.XD3_INVALID_INPUT:
+				C.xd3_close_stream(stream)
+				C.xd3_free_stream(stream)
+				return errors.Errorf("Xdelta error: %s [exit code: %d]. Possibly a source-patch mismatch.",
+					C.GoString(stream.msg), int(ret))
 			default:
-				stream_msg := C.GoString(stream.msg)
-				e := errors.New(fmt.Sprintf("Xdelta error: %s [exit code: %d].", stream_msg, int(ret)))
-				return e
+				C.xd3_close_stream(stream)
+				C.xd3_free_stream(stream)
+				return errors.Errorf("Xdelta error: %s [exit code: %d].",
+					C.GoString(stream.msg), int(ret))
 			}
 		}
+		// do {...} while (bytesRead != len(d.inBuf))
 		if bytesRead != len(d.inBuf) {
 			break
 		}
 	}
+
 	C.xd3_close_stream(stream)
 	C.xd3_free_stream(stream)
 
