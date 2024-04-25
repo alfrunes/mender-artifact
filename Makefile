@@ -28,7 +28,7 @@ ifeq ($(V),1)
 BUILDV = -v
 endif
 
-TAGS =
+TAGS ?= openssl
 ifeq ($(LOCAL),1)
 TAGS += local
 endif
