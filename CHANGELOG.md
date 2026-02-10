@@ -1,4 +1,79 @@
 ---
+## 4.3.0 - 2026-02-10
+
+
+### Bug fixes
+
+
+- Improve header path validation parsing artifact header
+ ([171d940](https://github.com/mendersoftware/mender-artifact/commit/171d94000ac8efc1308a1a06a52e3d1944c2599f))  by @alfrunes
+
+
+
+
+  Currently, the artifact format allows path traversal patterns in the
+  `header.tar` entry as only the prefix and basename of the path is
+  validated. Although the mender artifact library or CLI never extracts
+  the artifact header to the file system, the validation should validate
+  the paths against the specification.
+  This commit makes the installer parse the entire path pattern.
+- Compatibility with Windows for tar paths
+ ([743ec49](https://github.com/mendersoftware/mender-artifact/commit/743ec49680dd23fea8de7236b1c42fc1b738bb21))  by @alfrunes
+
+
+
+
+
+
+### Features
+
+
+- Add --compatible-types (-c) as alias for --device-type
+([MEN-9010](https://northerntech.atlassian.net/browse/MEN-9010)) ([1adacac](https://github.com/mendersoftware/mender-artifact/commit/1adacac680082e826ae6e82a990682b3427f61ee))  by @vpodzime
+
+
+
+
+
+
+
+  Add a new CLI option --compatible-types with short option -c that
+  works the same way as --device-type but is mutually exclusive
+  with it. This provides an alternative name for specifying
+  compatible types when creating artifacts.
+  
+  The new flag is available on all write subcommands: rootfs-image,
+  module-image, and bootstrap-artifact.
+
+
+
+
+### Build
+
+
+- Remove containerized build of `mender-artifact`
+([MEN-8687](https://northerntech.atlassian.net/browse/MEN-8687)) ([256fe95](https://github.com/mendersoftware/mender-artifact/commit/256fe95f459fbfbd4062f9d4551237c1e585f373))  by @lluiscampos
+
+
+
+
+
+  Long story short: let's clean-up the Dockerfiles, leave only the
+  `build-natives` for cross-compile, and update CI to Debian 13 images.
+  
+  We used to deliver `mender-artifact` as a prebuilt binary for Linux and
+  Mac OS. These used to be cross-compiled through Docker and, among other
+  things, locked to Openssl 1.1.
+  
+  Since more than a year ago we deliver it as a Debian package (for Linux)
+  and as a brew formula (for Mac OS) so that the dependencies are
+  correctly managed per OS.
+
+
+
+
+
+
 ## 4.2.0 - 2025-10-15
 
 
