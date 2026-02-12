@@ -20,6 +20,7 @@
 - Compatibility with Windows for tar paths
  ([743ec49](https://github.com/mendersoftware/mender-artifact/commit/743ec49680dd23fea8de7236b1c42fc1b738bb21))  by @alfrunes
 
+  Replaced path expansion library from OS dependent `path/filepath` to `path` which uses tar-compatible `/` separator for path segments when evaluating tar paths.
 
 
 
