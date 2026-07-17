@@ -1,6 +1,6 @@
-module github.com/mendersoftware/mender-artifact
+module github.com/alfrunes/mender-artifact/v4
 
-go 1.22.0
+go 1.25.0
 
 require (
 	cloud.google.com/go/kms v1.10.1
@@ -12,6 +12,7 @@ require (
 	github.com/hashicorp/vault/api v1.10.0
 	github.com/klauspost/compress v1.18.0
 	github.com/lestrrat-go/jwx v1.2.31
+	github.com/mendersoftware/mender-artifact v0.0.0-00010101000000-000000000000
 	github.com/mendersoftware/openssl v1.1.1-0.20221101135106-cb94d0a179f8
 	github.com/mendersoftware/progressbar v0.0.4
 	github.com/minio/sha256-simd v1.0.1
@@ -20,7 +21,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/ulikunitz/xz v0.5.15
 	github.com/urfave/cli v1.22.17
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.45.0
 	google.golang.org/protobuf v1.36.7
 )
 
@@ -34,11 +35,12 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/internal v1.1.1 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.3 // indirect
 	github.com/cenkalti/backoff/v3 v3.0.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
@@ -68,13 +70,13 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
-	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.54.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0 // indirect
-	go.opentelemetry.io/otel v1.34.0 // indirect
-	go.opentelemetry.io/otel/metric v1.34.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.34.0 // indirect
-	go.opentelemetry.io/otel/trace v1.34.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
@@ -88,3 +90,5 @@ require (
 	google.golang.org/grpc v1.67.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/mendersoftware/mender-artifact => ./
