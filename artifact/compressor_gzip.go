@@ -15,9 +15,8 @@
 package artifact
 
 import (
+	"compress/gzip"
 	"io"
-
-	gzip "github.com/klauspost/pgzip"
 )
 
 type CompressorGzip struct {
